@@ -1,0 +1,42 @@
+name: Update profile card
+
+on:
+  schedule:
+    - cron: "17 20 * * *" # daily, 03:17 Vietnam time
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: profile-card
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch GitHub stats
+        env:
+          # ACCESS_TOKEN (optional secret) also counts private repositories
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+        run: python scripts/fetch_stats.py
+
+      - name: Render card
+        run: python scripts/build_card.py
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dark_mode.svg light_mode.svg cache
+          git diff --cached --quiet || git commit -m "Update profile card"
+          git push
