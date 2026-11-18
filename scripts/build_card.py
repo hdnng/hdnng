@@ -60,6 +60,8 @@ def info_lines(cfg, stats):
     repos = f"{fmt(stats.get('repos'))} {{Contributed: {fmt(stats.get('contributed'))}}}"
     lines.append(pair("Repos", repos, "Stars", fmt(stats.get("stars"))))
     lines.append(pair("Commits", fmt(stats.get("commits")), "Followers", fmt(stats.get("followers"))))
+    days = lambda n: f"{n:,} day{'' if n == 1 else 's'}" if isinstance(n, int) else "-"
+    lines.append(pair("Streak", days(stats.get("streak")), "Longest", days(stats.get("longest_streak"))))
     add, rem = stats.get("additions"), stats.get("deletions")
     net = fmt(add - rem) if isinstance(add, int) and isinstance(rem, int) else "-"
     tail = [("value", net), ("text", " ( "), ("add", fmt(add) + "++"), ("text", ", "),

@@ -14,6 +14,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,6 +42,15 @@ query($login: String!, $id: ID!, $cursor: String) {
         stargazerCount
         defaultBranchRef { target { ... on Commit { oid history(author: {id: $id}) { totalCount } } } }
       }
+    }
+  }
+}"""
+
+CALENDAR_Q = """
+query($login: String!, $from: DateTime!, $to: DateTime!) {
+  user(login: $login) {
+    contributionsCollection(from: $from, to: $to) {
+      contributionCalendar { weeks { contributionDays { date contributionCount } } }
     }
   }
 }"""
@@ -89,6 +99,29 @@ def count_lines(repo, user_id):
         cursor = history["pageInfo"]["endCursor"]
 
 
+def streaks(login, created_at):
+    """Current and longest run of consecutive days with at least one contribution."""
+    today = datetime.now(timezone.utc).date()
+    days = {}
+    for year in range(int(created_at[:4]), today.year + 1):  # the API serves one year at a time
+        data = gql(CALENDAR_Q, login=login, **{"from": f"{year}-01-01T00:00:00Z", "to": f"{year}-12-31T23:59:59Z"})
+        for week in data["user"]["contributionsCollection"]["contributionCalendar"]["weeks"]:
+            for day in week["contributionDays"]:
+                days[day["date"]] = day["contributionCount"]
+    return streak_lengths(days, today.isoformat())
+
+
+def streak_lengths(days, today):
+    longest = run = 0
+    for day in sorted(d for d in days if d <= today):
+        run = run + 1 if days[day] else 0
+        longest = max(longest, run)
+        if day == today and not days[day]:
+            run = before_today  # today is not over yet, so an empty today does not break the streak
+        before_today = run
+    return run, longest
+
+
 def main():
     if not TOKEN:
         sys.exit("ACCESS_TOKEN is not set")
@@ -125,7 +158,10 @@ def main():
                     continue
         fresh[key] = entry
 
+    current, longest = streaks(login, user["createdAt"])
     stats = {
+        "streak": current,
+        "longest_streak": longest,
         "created_at": user["createdAt"],
         "followers": user["followers"]["totalCount"],
         "contributed": user["repositoriesContributedTo"]["totalCount"],
