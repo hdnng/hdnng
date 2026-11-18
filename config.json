@@ -4,7 +4,6 @@
   "info": [
     ["OS", "Windows 11, Linux"],
     ["Uptime", "{uptime}"],
-    ["Host", "VinUni AI20k - Track 3"],
     ["IDE", "VS Code"],
     null,
     ["Languages.Programming", "Python, TypeScript, Java, C#"],
