@@ -4,8 +4,10 @@
 Needs a token in ACCESS_TOKEN. The workflow's own GITHUB_TOKEN sees public
 repositories only; a personal access token also counts private ones.
 Lines of code are summed commit by commit, so per-repository totals are kept
-in cache/loc.json and only repositories whose head moved are counted again.
+in cache/loc.json (keyed by a hash of the repository name, since the cache is
+public) and only repositories whose head moved are counted again.
 """
+import hashlib
 import json
 import os
 import sys
@@ -109,17 +111,19 @@ def main():
         if not ref:  # empty repository
             continue
         oid, commits = ref["target"]["oid"], ref["target"]["history"]["totalCount"]
-        entry = cache.get(name)
+        # the cache is committed to a public repository, so never store repository names in it
+        key = hashlib.sha256(name.encode()).hexdigest()[:16]
+        entry = cache.get(key)
         if not entry or entry["oid"] != oid:
             try:
                 add, rem = count_lines(name, user["id"]) if commits else (0, 0)
                 entry = {"oid": oid, "commits": commits, "additions": add, "deletions": rem}
-                print(f"counted {name}: {commits} commits, +{add} -{rem}")
+                print(f"counted {key}: {commits} commits, +{add} -{rem}")
             except RuntimeError as e:
-                print(f"skipped {name}: {e}", file=sys.stderr)
+                print(f"skipped {key}: {e}", file=sys.stderr)
                 if not entry:
                     continue
-        fresh[name] = entry
+        fresh[key] = entry
 
     stats = {
         "created_at": user["createdAt"],
