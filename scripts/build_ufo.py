@@ -23,6 +23,13 @@ SPEED = 420                   # UFO cruising speed, px/s
 LIFT0, STAGGER, RISE = 0.1, 0.045, 0.34   # first lift-off, gap between cells, flight time (s)
 BEAM = LIFT0 + 6 * STAGGER + RISE + 0.1   # seconds spent abducting one week
 RESPAWN = 1.4                 # seconds the empty grid takes to refill at the end of a loop
+GLOAT = 1.8                   # seconds the UFO lingers after the last week, saying its final line
+CHAT_MIN_CELLS = 6            # a week with at least this many cells earns a speech bubble
+CHAT_GAP = 3.5                # minimum seconds between two bubbles
+CHAT_TIME = 1.5               # seconds a bubble stays up
+CHAT_LINES = ["haha!", "nom nom nom", "yummy commits", "more pls!", "so many squares", "delicious"]
+FINAL_LINE = "haha, all mine! see you tomorrow"
+CHAT_FS = 13                  # bubble font size (px)
 
 LEVELS = {
     "dark": ["#16303a", "#1e6b6f", "#2a9d8f", "#4fc4b3", "#8ff0dc"],
@@ -33,6 +40,20 @@ UFO = {
     "light": dict(hull="#4f6b76", rim="#8ea9b3", dome="#5bb6c9", glow="#0a7d6c", beam="#2a9d8f"),
 }
 LIGHTS = ["#ffbd2e", "#ff5f56", "#27c93f", "#58a6ff"]
+
+
+ALIEN_SKIN = "#8be38b"
+
+
+def alien(x, y, size, face):
+    """A little alien head centred on (x, y), `size` px tall, laughing."""
+    k = size / 14
+    return (f'<g transform="translate({x:.1f} {y:.1f}) scale({k:.3f})">'
+            f'<path d="M0 -7C6 -7 7.2 -1.5 5 3C3.2 6.2 1.2 7 0 7C-1.2 7 -3.2 6.2 -5 3C-7.2 -1.5 -6 -7 0 -7z" fill="{ALIEN_SKIN}"/>'
+            f'<path d="M-4.6 -0.6q1.9 -1.9 3.4 0.3M4.6 -0.6q-1.9 -1.9 -3.4 0.3" stroke="{face}" stroke-width="1.5" '
+            f'fill="none" stroke-linecap="round"/>'                     # squinting eyes: ^ ^
+            f'<path d="M-2.4 2.4q2.4 2.6 4.8 0z" fill="{face}"/>'       # open laughing mouth
+            f'</g>')
 
 
 def pct(t, total):
@@ -49,7 +70,7 @@ def timeline(weeks, grid_x, ufo_y):
         t += abs(cx - x) / SPEED
         stops.append((i, cx, t, t + BEAM))
         t, x = t + BEAM, cx
-    t_exit = t + abs(W + 60 - x) / SPEED
+    t_exit = t + (GLOAT if stops else 0) + abs(W + 60 - x) / SPEED
     return stops, t_exit, t_exit + RESPAWN
 
 
@@ -82,8 +103,9 @@ def render(theme, cal):
     # UFO path: enter from the left, pause over each week, exit right
     frames = [f"0%{{transform:translate(-60px,0)}}"]
     beam = ["0%{opacity:0}"]
-    for _, cx, a, l in stops:
-        frames.append(f"{pct(a, T)},{pct(l, T)}{{transform:translate({cx:.1f}px,0)}}")
+    for n, (_, cx, a, l) in enumerate(stops):
+        hold = l + (GLOAT if n == len(stops) - 1 else 0)
+        frames.append(f"{pct(a, T)},{pct(hold, T)}{{transform:translate({cx:.1f}px,0)}}")
         beam += [f"{pct(a, T)}{{opacity:0}}", f"{pct(a + 0.08, T)},{pct(l - 0.1, T)}{{opacity:.9}}",
                  f"{pct(l, T)}{{opacity:0}}"]
     frames.append(f"{pct(t_exit, T)},100%{{transform:translate({W + 60}px,0)}}")
@@ -102,6 +124,36 @@ def render(theme, cal):
                 f"@keyframes c{i}_{r}{{0%,{pct(s0, T)}{{transform:none;opacity:1;animation-timing-function:cubic-bezier(.5,0,.9,.6)}}"
                 f"{pct(s0 + RISE, T)},{pct(respawn, T)}{{transform:translateY({dy:.1f}px) rotate(200deg) scale(.25);opacity:0}}"
                 f"{pct(respawn + 0.01, T)}{{transform:none;opacity:0}}100%{{transform:none;opacity:1}}}}")
+
+    chats, last = [], -CHAT_GAP
+    for n, (i, cx, a, l) in enumerate(stops):
+        if n == len(stops) - 1:
+            chats.append((FINAL_LINE, cx, l + 0.1, l + GLOAT + 0.5))
+        elif (sum(1 for v in weeks[i] if v) >= CHAT_MIN_CELLS and l - last >= CHAT_GAP
+              and l + CHAT_TIME + 0.3 <= stops[-1][3]):  # keep clear of the final line
+            nxt = stops[n + 1][1]
+            chats.append((CHAT_LINES[len(chats) % len(CHAT_LINES)], max(cx, nxt), l, l + CHAT_TIME))
+            last = l
+    bubbles = []
+    for k, (line, reach, s0, e0) in enumerate(chats):
+        bw, bh = len(line) * CHAT_FS * 0.6 + 40, CHAT_FS + 14
+        right = reach + 22 + bw < W - 12           # flip to the left near the right edge
+        x0 = 22 if right else -22 - bw
+        y0 = ufo_y - 22 - bh
+        tail = (f"M{x0 + 10} {y0 + bh - 0.5}L6 {ufo_y - 12}L{x0 + 24} {y0 + bh - 0.5}" if right else
+                f"M{x0 + bw - 10} {y0 + bh - 0.5}L-6 {ufo_y - 12}L{x0 + bw - 24} {y0 + bh - 0.5}")
+        bubbles.append(
+            f'<g id="b{k}"><path d="{tail}" fill="{c["bar"]}" stroke="{c["value"]}"/>'
+            f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{bh}" rx="7" fill="{c["bar"]}" stroke="{c["value"]}"/>'
+            f'<path d="M{x0 + 8 if right else x0 + bw - 26} {y0 + bh}h18" stroke="{c["bar"]}" stroke-width="2"/>'
+            + alien(x0 + 16, y0 + bh / 2, 16, "#10302a") +
+            f'<text x="{x0 + 30:.1f}" y="{y0 + bh / 2 + CHAT_FS * 0.36:.1f}" font-size="{CHAT_FS}" class="v">{line}</text></g>')
+        css.append(
+            f"#b{k}{{opacity:0;transform-box:fill-box;transform-origin:{'0% 100%' if right else '100% 100%'};"
+            f"animation:b{k} {T:.2f}s infinite}}"
+            f"@keyframes b{k}{{0%,{pct(s0, T)}{{opacity:0;transform:scale(.2)}}"
+            f"{pct(s0 + 0.18, T)}{{opacity:1;transform:scale(1.08)}}{pct(s0 + 0.28, T)},{pct(e0 - 0.2, T)}{{opacity:1;transform:scale(1)}}"
+            f"{pct(e0, T)},100%{{opacity:0;transform:scale(1)}}}}")
 
     o = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
          f'font-family="Consolas, \'Cascadia Mono\', \'DejaVu Sans Mono\', Menlo, monospace" role="img" '
@@ -141,13 +193,14 @@ def render(theme, cal):
              f'<path id="beam" d="M-9 {top}L9 {top}L15 {top + beam_h}L-15 {top + beam_h}z" fill="url(#bg)"/>'
              f'<g transform="translate(0 {ufo_y}) scale(1.4) translate(0 {-ufo_y})">'
              f'<ellipse cx="0" cy="{ufo_y + 5}" rx="10" ry="2.6" fill="{u["glow"]}" opacity=".75"/>'
-             f'<path d="M-10 {ufo_y - 2}a10 10 0 0 1 20 0z" fill="{u["dome"]}" opacity=".9"/>'
+             + alien(0, ufo_y - 5.5, 9, "#10302a") +
+             f'<path d="M-10 {ufo_y - 2}a10 10 0 0 1 20 0z" fill="{u["dome"]}" opacity=".45"/>'
              f'<path d="M-5 {ufo_y - 6}a6 6 0 0 1 5 -4" stroke="#fff" stroke-opacity=".7" stroke-width="1.5" fill="none" stroke-linecap="round"/>'
              f'<ellipse cx="0" cy="{ufo_y + 1}" rx="23" ry="6.5" fill="{u["hull"]}"/>'
              f'<ellipse cx="0" cy="{ufo_y - 1}" rx="21" ry="3" fill="{u["rim"]}"/>')
     for k, col in enumerate(LIGHTS):
         o.append(f'<circle class="lt" style="animation-delay:-{k * 0.22:.2f}s" cx="{-13.5 + k * 9}" cy="{ufo_y + 2.5}" r="1.7" fill="{col}"/>')
-    o.append("</g></g></g>")
+    o.append("</g></g>" + "".join(bubbles) + "</g>")
 
     total = cal.get("total")
     active = sum(1 for w in weeks for v in w if v)
