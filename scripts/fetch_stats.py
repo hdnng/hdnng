@@ -55,6 +55,18 @@ query($login: String!, $from: DateTime!, $to: DateTime!) {
   }
 }"""
 
+LAST_YEAR_Q = """
+query($login: String!) {
+  user(login: $login) {
+    contributionsCollection {
+      contributionCalendar {
+        totalContributions
+        weeks { contributionDays { weekday contributionLevel } }
+      }
+    }
+  }
+}"""
+
 LOC_Q = """
 query($owner: String!, $name: String!, $id: ID!, $cursor: String) {
   repository(owner: $owner, name: $name) {
@@ -122,6 +134,21 @@ def streak_lengths(days, today):
     return run, longest
 
 
+LEVEL = {"NONE": 0, "FIRST_QUARTILE": 1, "SECOND_QUARTILE": 2, "THIRD_QUARTILE": 3, "FOURTH_QUARTILE": 4}
+
+
+def last_year(login):
+    """The calendar GitHub shows on the profile: weeks of 7 levels (0-4), None outside the range."""
+    cal = gql(LAST_YEAR_Q, login=login)["user"]["contributionsCollection"]["contributionCalendar"]
+    weeks = []
+    for week in cal["weeks"]:
+        days = [None] * 7
+        for day in week["contributionDays"]:
+            days[day["weekday"]] = LEVEL.get(day["contributionLevel"], 0)
+        weeks.append(days)
+    return {"total": cal["totalContributions"], "weeks": weeks}
+
+
 def main():
     if not TOKEN:
         sys.exit("ACCESS_TOKEN is not set")
@@ -173,6 +200,7 @@ def main():
     }
     cache_file.parent.mkdir(exist_ok=True)
     cache_file.write_text(json.dumps(fresh, indent=1, sort_keys=True) + "\n")
+    (ROOT / "cache" / "calendar.json").write_text(json.dumps(last_year(login), separators=(",", ":")) + "\n")
     (ROOT / "cache" / "stats.json").write_text(json.dumps(stats, indent=1) + "\n")
     print(stats)
 

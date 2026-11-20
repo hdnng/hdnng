@@ -9,8 +9,8 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/hdnng/hdnng/output/github-snake-dark.svg" />
-    <img src="https://raw.githubusercontent.com/hdnng/hdnng/output/github-snake.svg" alt="Contribution snake" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="ufo_dark.svg" />
+    <img src="ufo_light.svg" alt="A UFO abducting the contribution calendar, one week at a time" width="100%" />
   </picture>
 </p>
 
