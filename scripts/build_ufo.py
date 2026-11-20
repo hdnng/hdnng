@@ -326,16 +326,17 @@ def render(theme, cal):
 
         # explosion: flash, shock ring and debris
         grow = "transform-box:fill-box;transform-origin:center;"
-        an.add("#xf", "xf", [(boom, "transform:scale(.2);opacity:1"), (boom + 0.32, "transform:scale(1.7);opacity:0")],
+        # every effect starts hidden: Anim holds the first frame back to 0%, so say "hidden" explicitly
+        an.add("#xf", "xf", [(boom - 0.01, "transform:scale(.2);opacity:0"), (boom, "transform:scale(.2);opacity:1"), (boom + 0.32, "transform:scale(1.7);opacity:0")],
                base="opacity:0;" + grow)
-        an.add("#xr", "xr", [(boom, "transform:scale(.3);opacity:1"), (boom + 0.6, "transform:scale(5);opacity:0")],
+        an.add("#xr", "xr", [(boom - 0.01, "transform:scale(.3);opacity:0"), (boom, "transform:scale(.3);opacity:1"), (boom + 0.6, "transform:scale(5);opacity:0")],
                base="opacity:0;" + grow)
         fx.append(f'<circle id="xf" cx="{x_s:.1f}" cy="{ufo_y}" r="16" fill="#fff3b0"/>')
         fx.append(f'<circle id="xr" cx="{x_s:.1f}" cy="{ufo_y}" r="7" fill="none" stroke="#ffbd2e" stroke-width="2"/>')
         for k in range(10):
             ang = 2 * math.pi * k / 10 + 0.3
             dx, dy = math.cos(ang) * 46, math.sin(ang) * 30 + 26
-            an.add(f"#xd{k}", f"xd{k}", [(boom, "transform:none;opacity:1"),
+            an.add(f"#xd{k}", f"xd{k}", [(boom - 0.01, "transform:none;opacity:0"), (boom, "transform:none;opacity:1"),
                                          (boom + 0.75, f"transform:translate({dx:.1f}px,{dy:.1f}px) rotate({160 + k * 40}deg);opacity:0")],
                    base="opacity:0;" + grow, timing="cubic-bezier(.2,.6,.4,1)")
             col = (FOE["hull"], FOE["rim"], "#ffbd2e")[k % 3]
@@ -343,7 +344,8 @@ def render(theme, cal):
 
         # our UFO pops a GitHub star to celebrate
         st = ob + battle["star"]
-        an.add("#star", "star", [(st, "transform:translateY(18px) scale(0) rotate(0deg);opacity:1"),
+        an.add("#star", "star", [(st - 0.01, "transform:translateY(18px) scale(0) rotate(0deg);opacity:0"),
+                                 (st, "transform:translateY(18px) scale(0) rotate(0deg);opacity:1"),
                                  (st + 0.35, "transform:translateY(-8px) scale(1.3) rotate(250deg);opacity:1"),
                                  (st + 0.6, "transform:translateY(-12px) scale(1) rotate(360deg);opacity:1"),
                                  (st + 1.5, "transform:translateY(-20px) scale(1) rotate(360deg);opacity:1"),
@@ -355,7 +357,7 @@ def render(theme, cal):
         fx.append(f'<polygon id="star" points="{star}" fill="{STAR}" stroke="#fff6c8" stroke-width="1" stroke-linejoin="round"/>')
         for k, (px, py) in enumerate(((x_o - 22, sy - 6), (x_o + 20, sy - 18), (x_o + 16, sy + 8))):
             s1 = st + 0.4 + k * 0.25
-            an.add(f"#sp{k}", f"sp{k}", [(s1, "transform:scale(0);opacity:1"), (s1 + 0.25, "transform:scale(1.2);opacity:1"),
+            an.add(f"#sp{k}", f"sp{k}", [(s1 - 0.01, "transform:scale(0);opacity:0"), (s1, "transform:scale(0);opacity:1"), (s1 + 0.25, "transform:scale(1.2);opacity:1"),
                                          (s1 + 0.5, "transform:scale(0);opacity:1"), (s1 + 0.51, "transform:scale(0);opacity:0")],
                    base="opacity:0;" + grow)
             fx.append(f'<path id="sp{k}" d="M{px} {py - 5}L{px + 1.3} {py - 1.3}L{px + 5} {py}L{px + 1.3} {py + 1.3}'
