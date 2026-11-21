@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Render dark_mode.svg / light_mode.svg from config.json, the ASCII eyes and cache/stats.json."""
+"""Render dark_mode.svg / light_mode.svg from config.json, the ASCII eye and cache/stats.json."""
 import json
+import math
 from datetime import date
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -8,13 +9,25 @@ from xml.sax.saxutils import escape
 ROOT = Path(__file__).resolve().parent.parent
 COLS = 56                      # width of the info column, in characters
 INFO_FS, INFO_LH = 15, 24      # info font size / line height (px)
-GAZE_T = 12.0                  # seconds in one loop of glances and blinks
+EYE_T = 14.0                   # seconds in one loop of the eye's routine
 FPS = 30                       # sampling rate of the eye animation
-# where the irises look (seconds, dx, dy in px) and when the lids blink (start times)
-GLANCES = [(0.0, 0, 0), (1.8, -20, 1), (3.4, 21, -2), (4.9, 14, -9), (7.0, -15, 8),
-           (8.6, 4, 2), (9.4, 0, 0)]
-BLINKS = [6.3, 10.2, 10.58]
-SACCADE = 0.16                 # seconds for the irises to jump to a new spot
+# the eye's routine: (time, dx, dy, squint 0-1, move seconds or None for a quick saccade)
+GLANCES = [(0.0, 0, 0, 0, None),
+           (1.4, 34, -2, 0.18, None),           # side-eye towards the stats
+           (2.8, 33, -6, 0.22, None),           # ...and read them, line by line
+           (3.15, 33, -2, 0.22, None),
+           (3.5, 33, 2, 0.25, None),
+           (3.85, 33, 6, 0.28, None),
+           (4.6, 0, 0, 0, None),                # back to the middle (with a blink)
+           (6.0, -30, -9, 0, None),             # up and left, pupil widening
+           (7.3, -26, 8, 0.1, None),            # down and left
+           (8.5, 31, 0, 0, None),               # a quick look right...
+           (8.85, 0, 0, 0, None),               # ...and a double take
+           (11.2, 10, -3, 0, 0.9),              # slow drift while idle
+           (12.3, -8, 2, 0, 0.9),
+           (13.3, 0, 0, 0, 0.7)]
+BLINKS = [4.5, 9.9, 10.26]
+PUPIL = [(0, 1.0), (5.9, 1.0), (6.5, 1.2), (7.3, 1.2), (7.9, 1.0), (8.4, 1.0), (8.7, 0.8), (10.8, 0.8), (11.8, 1.0)]
 CW = 0.6                       # monospace advance width, in em
 PAD, BAR = 28, 40
 
@@ -31,69 +44,120 @@ def ease(s):
     return s * s * (3 - 2 * s)
 
 
-def gaze_at(t):
-    """Iris offset at time t: hold each glance, jump to the next one quickly."""
-    x, y = GLANCES[0][1:]
-    for (t1, x1, y1) in GLANCES[1:]:
+def snap(s):
+    """Saccade profile: fast start, soft landing."""
+    s = min(max(s, 0.0), 1.0)
+    return 1 - (1 - s) ** 3
+
+
+def glance_at(t):
+    """(dx, dy, squint) at time t."""
+    x, y, q = GLANCES[0][1:4]
+    for (t1, x1, y1, q1, move) in GLANCES[1:]:
         if t >= t1:
-            k = ease((t - t1) / SACCADE)
-            x, y = x + (x1 - x) * k, y + (y1 - y) * k
-    return x, y
+            dur = move or 0.05 + math.hypot(x1 - x, y1 - y) * 0.0025
+            k = (ease if move else snap)((t - t1) / dur)
+            x, y, q = x + (x1 - x) * k, y + (y1 - y) * k, q + (q1 - q) * k
+    return x, y, q
+
+
+# tiny fixational jitter so the eye never looks frozen
+_JIT = [(0.23 + k * 0.47 + 0.11 * math.sin(k * 7.1), 1.3 * math.sin(k * 2.3), 0.9 * math.cos(k * 3.7))
+        for k in range(int(EYE_T / 0.47))]
+
+
+def gaze_at(t):
+    x, y, _ = glance_at(t)
+    jx = jy = 0.0
+    for (tj, ax, ay) in _JIT:
+        if t >= tj:
+            k = snap((t - tj) / 0.05)
+            jx, jy = jx + (ax - jx) * k, jy + (ay - jy) * k
+    return x + jx, y + jy
+
+
+def pupil_at(t):
+    for (t0, a), (t1, b) in zip(PUPIL, PUPIL[1:]):
+        if t0 <= t < t1:
+            return a + (b - a) * ease((t - t0) / (t1 - t0))
+    return PUPIL[-1][1]
 
 
 def lid_at(t, close):
-    """Upper lid drop at time t: follows the gaze a little, and closes fully on blinks."""
-    drop = 0.35 * gaze_at(t)[1]
+    """How far the upper lid edge drops (px): squints, follows a downward look, closes on blinks."""
+    x, y, q = glance_at(t)
+    drop = 38 * q + 0.6 * max(y, 0)
     for b in BLINKS:
         d = t - b
-        if 0 <= d < 0.09:
-            k = ease(d / 0.09)
-        elif 0.09 <= d < 0.13:
+        if 0 <= d < 0.08:
+            k = ease(d / 0.08)
+        elif 0.08 <= d < 0.12:
             k = 1.0
-        elif 0.13 <= d < 0.28:
-            k = 1 - ease((d - 0.13) / 0.15)
+        elif 0.12 <= d < 0.3:
+            k = 1 - ease((d - 0.12) / 0.18)
         else:
             continue
         drop += (close - drop) * k
     return drop
 
 
-def eyes_svg(c, eyes, ax, ay):
-    """The animated eyes: static base, irises behind each opening, sliding upper lids."""
-    cw, ch, base = eyes["cell_w"], eyes["cell_h"], eyes["baseline"]
+def keyframes(name, fn):
+    """Sample fn(t) -> declarations over the loop, dropping frames that repeat."""
+    n = int(EYE_T * FPS)
+    frames = [(k / FPS, fn(k / FPS)) for k in range(n)] + [(EYE_T, fn(0.0))]
+    keep = [f for i, f in enumerate(frames)
+            if i in (0, len(frames) - 1) or not (frames[i - 1][1] == f[1] == frames[i + 1][1])]
+    return f"@keyframes {name}{{" + "".join(f"{t / EYE_T * 100:.2f}%{{{d}}}" for t, d in keep) + "}"
 
-    def text(rows, col, row, cls):
-        return "".join(f'<text class="{cls}" x="{ax + col * cw:.2f}" y="{ay + (row + i) * ch + ch * base:.2f}" '
-                       f'textLength="{len(r) * cw:.2f}">{escape(r)}</text>' for i, r in enumerate(rows) if r.strip())
 
-    n = int(GAZE_T * FPS)
-    times = [k / FPS for k in range(n)] + [GAZE_T]
-    pct = lambda t: f"{t / GAZE_T * 100:.2f}%"
-    close = eyes["eyes"][0]["close"]
-    gz = "".join(f"{pct(t)}{{transform:translate({gaze_at(t)[0]:.1f}px,{gaze_at(t)[1]:.1f}px)}}" for t in times)
-    ld = "".join(f"{pct(t)}{{transform:translateY({lid_at(t, close):.1f}px)}}" for t in times)
-    css = (f".gz{{animation:gz {GAZE_T}s linear infinite}}@keyframes gz{{{gz}}}"
-           f".ld{{animation:ld {GAZE_T}s linear infinite}}@keyframes ld{{{ld}}}"
+def eye_svg(c, eye, ax, ay, theme):
+    """One animated eye: static picture, an iris that glances around behind the opening with a
+    breathing pupil and lagging catchlights, and an upper lid that stretches down to blink."""
+    cw, ch, base = eye["cell_w"], eye["cell_h"], eye["baseline"]
+    pts = lambda poly: " ".join(f"{ax + x:.1f},{ay + y:.1f}" for x, y in poly)
+
+    def text(spr, cls):
+        return "".join(f'<text class="{cls}" x="{ax + spr["col"] * cw:.2f}" y="{ay + (spr["row"] + i) * ch + ch * base:.2f}" '
+                       f'textLength="{len(r) * cw:.2f}">{escape(r)}</text>' for i, r in enumerate(spr["rows"]) if r.strip())
+
+    ix, iy = ax + eye["iris_center"][0], ay + eye["iris_center"][1]
+    y0 = ay + eye["crease_top"]                                   # the lid stretches down from here
+    span = eye["lash_mid"] + 5 - eye["crease_top"]
+    close = eye["low_mid"] - eye["lash_mid"] + 3
+
+    def stretch(t):
+        s = 1 + lid_at(t, close) / span
+        return f"transform:translate(0px,{y0:.1f}px) scale(1,{s:.3f}) translate(0px,{-y0:.1f}px)"
+
+    css = (keyframes("gz", lambda t: "transform:translate({:.1f}px,{:.1f}px)".format(*gaze_at(t)))
+           + keyframes("gl", lambda t: "transform:translate({:.1f}px,{:.1f}px)".format(*(0.35 * v for v in gaze_at(t))))
+           + keyframes("pp", lambda t: f"transform:scale({pupil_at(t):.3f})")
+           + keyframes("st", stretch)
+           + keyframes("lv", lambda t: f"opacity:{1 if lid_at(t, close) > 0.4 else 0}")
+           + f".gz{{animation:gz {EYE_T}s linear infinite}}.gl{{animation:gl {EYE_T}s linear infinite}}"
+           f".pp{{transform-box:fill-box;transform-origin:center;animation:pp {EYE_T}s linear infinite}}"
+           f".st{{animation:st {EYE_T}s linear infinite}}.lv{{opacity:0;animation:lv {EYE_T}s steps(1) infinite}}"
            f".iris{{fill:{c['value']}}}"
-           "@media (prefers-reduced-motion:reduce){.gz,.ld{animation:none}}")
-    out = [f'<g class="art" font-size="{eyes["font_size"]}" font-weight="bold" xml:space="preserve">',
-           text(eyes["base"], 0, 0, "art")]
-    defs = []
-    for k, e in enumerate(eyes["eyes"]):
-        poly = " ".join(f"{ax + x:.1f},{ay + y:.1f}" for x, y in e["opening"])
-        defs.append(f'<clipPath id="eye{k}"><polygon points="{poly}"/></clipPath>')
-        ex, ey = ax + e["center"][0], ay + e["center"][1]
-        lid = e["lid_curve"]
-        cover = (" ".join(f"{ax + x:.1f},{ay + y:.1f}" for x, y in lid) +
-                 f" {ax + lid[-1][0]:.1f},{ay + lid[-1][1] - 140:.1f} {ax + lid[0][0]:.1f},{ay + lid[0][1] - 140:.1f}")
-        out.append(f'<g clip-path="url(#eye{k})"><g class="gz">'
-                   f'<circle cx="{ex:.1f}" cy="{ey:.1f}" r="{e["r_iris"] + 1:.1f}" fill="{c["bg"]}"/>'
-                   + text(e["iris"]["rows"], e["iris"]["col"], e["iris"]["row"], "iris")
-                   + text(e["pupil"]["rows"], e["pupil"]["col"], e["pupil"]["row"], "art") + "</g>"
-                   f'<polygon class="ld" points="{cover}" fill="{c["bg"]}"/></g>')
-        out.append(f'<g class="ld">' + text(e["lid"]["rows"], e["lid"]["col"], e["lid"]["row"], "art") + "</g>")
-    out.append("</g>")
-    return css, "<defs>" + "".join(defs) + "</defs>" + "".join(out)
+           "@media (prefers-reduced-motion:reduce){.gz,.gl,.pp,.st,.lv{animation:none}}")
+    if theme == "light":     # solid ink pupil, catchlights cut out of it
+        w, d = eye["glint_shape"]["window"], eye["glint_shape"]["dot"]
+        pupil = text(eye["pupil"], "art")
+        glint = (f'<polygon points="{" ".join(f"{ix + x:.1f},{iy + y:.1f}" for x, y in w)}" fill="{c["bg"]}"/>'
+                 f'<circle cx="{ix + d[0]:.1f}" cy="{iy + d[1]:.1f}" r="{d[2]}" fill="{c["bg"]}"/>')
+    else:                    # dark pupil, catchlights drawn in ink
+        pupil, glint = "", text(eye["glint"], "art")
+    defs = (f'<defs><clipPath id="eyeopen"><polygon points="{pts(eye["opening"])}"/></clipPath>'
+            f'<clipPath id="eyelid"><polygon points="{pts(eye["lid_clip"])}"/></clipPath></defs>')
+    out = [defs, f'<g class="art" font-size="{eye["font_size"]}" font-weight="bold" xml:space="preserve">',
+           text(dict(col=0, row=0, rows=eye["base"]), "art"),
+           f'<g clip-path="url(#eyeopen)"><g class="gz">'
+           f'<circle cx="{ix:.1f}" cy="{iy:.1f}" r="{eye["r_iris"] + 1:.1f}" fill="{c["bg"]}"/>' + text(eye["iris"], "iris") +
+           f'<g class="pp"><circle cx="{ix:.1f}" cy="{iy:.1f}" r="{eye["r_pupil"]:.1f}" fill="{c["bg"]}"/>{pupil}</g></g>'
+           f'<g class="gl">{glint}</g></g>',
+           f'<g class="lv" clip-path="url(#eyelid)"><g class="st"><polygon points="{pts(eye["band_poly"])}" fill="{c["bg"]}"/>'
+           + text(eye["band_text"], "art") + "</g></g>",
+           "</g>"]
+    return css, "".join(out)
 
 
 def uptime(since: date, today: date) -> str:
@@ -153,15 +217,15 @@ def info_lines(cfg, stats):
 
 def render(theme, cfg, stats):
     c = THEMES[theme]
-    eyes = json.loads((ROOT / "assets" / "eyes.json").read_text())
-    art_w, art_h = eyes["cols"] * eyes["cell_w"], eyes["rows"] * eyes["cell_h"]
+    eye = json.loads((ROOT / "assets" / "eye.json").read_text())
+    art_w, art_h = eye["cols"] * eye["cell_w"], eye["rows"] * eye["cell_h"]
     lines = info_lines(cfg, stats)
     info_w, info_h = COLS * INFO_FS * CW, len(lines) * INFO_LH
     body_h = max(art_h, info_h)
     W = round(PAD + art_w + PAD + info_w + PAD)
     H = round(BAR + PAD + body_h + PAD)
     info_x = PAD + art_w + PAD
-    eye_css, eye_svg = eyes_svg(c, eyes, PAD, BAR + PAD + (body_h - art_h) / 2)
+    eye_css, eye_markup = eye_svg(c, eye, PAD, BAR + PAD + (body_h - art_h) / 2, theme)
     o = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
          f'font-family="Consolas, \'Cascadia Mono\', \'DejaVu Sans Mono\', Menlo, monospace" role="img" '
          f'aria-label="{cfg["username"]} profile card">',
@@ -178,7 +242,7 @@ def render(theme, cfg, stats):
         o.append(f'<circle cx="{24 + i * 20}" cy="{BAR / 2}" r="6" fill="{col}"/>')
     o.append(f'<text x="{W / 2}" y="{BAR / 2 + 5}" text-anchor="middle" font-size="13" class="dots" '
              f'style="fill:{c["text"]};opacity:.7">{cfg["username"]} -- neofetch</text>')
-    o.append(eye_svg)
+    o.append(eye_markup)
     y0 = BAR + PAD + (body_h - info_h) / 2 + INFO_FS
     o.append(f'<g font-size="{INFO_FS}" xml:space="preserve">')
     for i, segs in enumerate(lines):
