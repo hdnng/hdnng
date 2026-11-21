@@ -64,6 +64,14 @@ def crease_y(u):
     return lash_y(min(u, 1)) - 20 - 12 * max(1 - u * u, 0) ** 0.8 - 30 * max(u - 1, 0)
 
 
+def edge_y(u, c=0.0):
+    """Upper lid edge with the lid closed by c (0 open .. 1 shut). Shut, it rests just above the
+    lower lid; past the outer corner the lash flick swings from up-and-out to down-and-out."""
+    uu = min(u, 1)
+    y = (1 - c) * lash_y(uu) + c * (low_y(uu) - 3)
+    return y - (1 - c) * 57.2 * max(u - 1, 0) + c * 14 * max(u - 1, 0)
+
+
 def X(u):
     return CX + u * A
 
@@ -72,8 +80,18 @@ def curve(f, a=-1.0, b=1.0, n=80):
     return [(X(u), f(u)) for u in np.linspace(a, b, n)]
 
 
-def opening():
-    return curve(lash_y) + curve(low_y)[::-1]
+def opening(c=0.0):
+    return curve(lambda u: edge_y(u, c)) + curve(low_y)[::-1]
+
+
+LID_LEVELS = [0.12, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0]   # pre-drawn lid positions for blinks and squints
+
+
+def lid_region(c):
+    """Area a lid frame repaints: from above the lashes down to just under the lid edge."""
+    top = [(X(u), lash_y(min(u, 1)) - 40 - 57 * max(u - 1, 0)) for u in np.linspace(-1.05, 1.2, 60)]
+    bot = [(X(u), edge_y(u, c) + 6 + 10 * c * c) for u in np.linspace(1.2, -1.05, 60)]
+    return top + bot
 
 
 # ---------------------------------------------------------------- painting
@@ -127,7 +145,9 @@ def smooth(a, b, x):
     return s * s * (3 - 2 * s)
 
 
-def paint_base(rng):
+def paint_base(rng, c=0.0):
+    """The whole picture except the iris, with the upper lid closed by c. The random draws do
+    not depend on c, so every lid position shares the same skin, brow and lashes."""
     p = Paint(0.66)
     x, y = p.x, p.y
     # skin: fine grain, brow-bone highlight, shadow under the brow, soft socket shading
@@ -160,16 +180,18 @@ def paint_base(rng):
     p.put(hair, 0.1, 0.95)
 
     # upper lid: a soft shadow tucked under the fold, light across the lid, then the crease line
-    cr = np.interp(x, *zip(*curve(crease_y, -1.2, 1.3)))
-    la = np.interp(x, *zip(*curve(lash_y, -1, 1)))
+    crease = lambda v: crease_y(v) + 6 * c                                        # the fold eases down too
+    cr = np.interp(x, *zip(*curve(crease, -1.2, 1.3)))
+    la = np.interp(x, *zip(*curve(lambda v: edge_y(v, c), -1, 1)))
     on_lid = smooth(-1.25, -1.0, u) * smooth(1.3, 1.1, u)
     p.L -= 0.16 * np.exp(-((y - cr + 4) / 7) ** 2) * on_lid                    # overhang shadow
-    p.L += 0.08 * np.exp(-((y - (cr + la) / 2) / 8) ** 2) * on_lid * (np.abs(u) < 1)  # lit lid
-    p.stroke(curve(crease_y, -0.95, 1.13), 1.8, 0.25, 0.8, 1.0)                  # the crease
+    p.L += 0.08 * np.exp(-((y - (cr + la) / 2) / (8 + 14 * c)) ** 2) * on_lid * (np.abs(u) < 1)  # lit lid
+    p.L -= 0.08 * c * np.exp(-np.clip(la - y, 0, None) / 6) * (y < la) * (np.abs(u) < 1)  # rim of the closing lid
+    p.stroke(curve(crease, -0.95, 1.13), 1.8, 0.25, 0.8, 1.0)                    # the crease
 
     # eye white: rounded shading, shadow cast by the lid, darker corners, a few faint veins
-    op = p.poly(opening(), 0.4)
-    top = np.interp(x, *zip(*curve(lash_y)))
+    op = p.poly(opening(c), 0.4)
+    top = np.interp(x, *zip(*curve(lambda v: edge_y(v, c))))
     ball = ((x - IRIS[0]) / (A * 1.05)) ** 2 + ((y - IRIS[1]) / 95) ** 2
     white = 0.93 - 0.18 * ball - 0.5 * np.exp(-np.clip(y - top, 0, None) / 11) - 0.25 * smooth(0.6, 1.0, np.abs(u))
     p.put(op, np.clip(white, 0, 1))
@@ -201,20 +223,21 @@ def paint_base(rng):
         for k in range(len(us) - 1):
             ua, ub = us[k], us[k + 1]
             w = (3 + 5 * max(1 - (ua - 0.25) ** 2, 0)) * S
-            ya = lash_y(min(ua, 1)) - 26 * max(ua - 1, 0) * 2.2
-            yb = lash_y(min(ub, 1)) - 26 * max(ub - 1, 0) * 2.2
+            ya, yb = edge_y(ua, c), edge_y(ub, c)
             d.line([(X(ua) * S, ya * S), (X(ub) * S, yb * S)], fill=255, width=round(w))
     p.put(p.mask(band, 0.5), 0.04)
-    # upper lashes: clumped, curling up and out, longest towards the outer corner
+    # upper lashes: clumped, curling up and out, longest towards the outer corner; as the lid
+    # closes they swing round to hang down and out
     for u0 in np.sort(rng.uniform(-0.9, 1.1, 150)):
         u1 = u0
         bx = X(u1)
-        by = lash_y(min(u1, 1)) - 26 * max(u1 - 1, 0) * 2.2 - 1
+        by = edge_y(u1, c) - 1
         t = min(max((u0 + 0.9) / 2.0, 0.0), 1.0)
         ln = (7 + 22 * t ** 1.5) * rng.uniform(0.55, 1.15)
-        ang = math.radians(-100 + 75 * t + rng.normal(0, 5))
-        p2 = (bx + math.cos(ang) * ln + 6 * t, by + math.sin(ang) * ln + 4 * t)
-        p1 = (bx + math.cos(ang) * ln * 0.45, by + math.sin(ang) * ln * 0.6 - 3)
+        ang = math.radians((1 - c) * (-100 + 75 * t) + c * (80 - 40 * t) + rng.normal(0, 5))
+        curl = 1 - 2 * c
+        p2 = (bx + math.cos(ang) * ln + 6 * t, by + math.sin(ang) * ln + 4 * t * curl)
+        p1 = (bx + math.cos(ang) * ln * 0.45, by + math.sin(ang) * ln * 0.6 - 3 * curl)
         p.taper(bezier((bx, by), p1, p2), rng.uniform(1.0, 1.7), 0.3, 0.05, 0.95)
 
     # a beauty mark just below and outside the outer corner
@@ -321,24 +344,21 @@ def main():
     fx, fy = (base.x - ART_W / 2) / (ART_W / 2 + 6), (base.y - ART_H / 2) / (ART_H / 2 + 4)
     fade = np.clip((1 - (np.abs(fx) ** 2.6 + np.abs(fy) ** 2.6)) / 0.45, 0, 1) ** 0.9
 
-    band_poly = curve(crease_y, -1.02, 1.16) + [(X(1.16), lash_y(1) - 26 * 0.16 * 2.2 + 6)] + \
-        [(x, y + 5) for x, y in curve(lash_y, -1, 1)[::-1]]
     out = dict(cols=COLS, rows=ROWS, cell_w=CELL_W, cell_h=CELL_H, font_size=round(CELL_W / 0.6, 3),
                baseline=base_frac, iris_center=list(IRIS), r_iris=R_IRIS, r_pupil=R_PUPIL,
                glint_shape=dict(window=window, dot=[gx, gy, gr]),
-               opening=[[round(x, 2), round(y, 2)] for x, y in opening()],
-               band_poly=[[round(x, 2), round(y, 2)] for x, y in band_poly],
-               lid_clip=[[round(x, 2), round(y, 2)] for x, y in
-                         curve(crease_y, -1.05, 1.16) + [(X(1.16), low_y(1) + 4)] +
-                         [(x, y + 4) for x, y in curve(low_y, -1, 1)[::-1]] + [(X(-1.05), low_y(-1) + 4)]],
-               crease_top=float(min(crease_y(u) for u in np.linspace(-1, 1, 200))),
-               lash_mid=float(lash_y(0.0)), low_mid=float(low_y(0.0)))
-    in_band = inside(band_poly)
+               opening=[[round(x, 2), round(y, 2)] for x, y in opening()])
     # one set of layers serves both cards; the pupil is solid ink on the light card, while the
     # dark card leaves it empty (dark) and draws the catchlights in ink instead
     b = to_ascii(density(base.L, fade), bank)
-    out.update(base=b, iris=sprite(to_ascii(density(iris_L, fade) * iris_m, bank)), band_text=sprite(b, in_band),
-               pupil=sprite(to_ascii(fade * pm, bank)), glint=sprite(to_ascii(fade * gm, bank)))
+    out.update(base=b, iris=sprite(to_ascii(density(iris_L, fade) * iris_m, bank)),
+               pupil=sprite(to_ascii(fade * pm, bank)), glint=sprite(to_ascii(fade * gm, bank)), lids=[])
+    # the lid at each closing level, repainted from scratch and cropped to the area it changes
+    for c in LID_LEVELS:
+        region = lid_region(c)
+        rows = to_ascii(density(paint_base(np.random.default_rng(11), c).L, fade), bank)
+        out["lids"].append(dict(c=c, poly=[[round(x, 2), round(y, 2)] for x, y in region],
+                                text=sprite(rows, inside(region))))
     preview = b
     (ROOT / "assets" / "eye.json").write_text(json.dumps(out, separators=(",", ":")) + "\n")
     print("\n".join(r.rstrip() for r in preview))

@@ -83,22 +83,30 @@ def pupil_at(t):
     return PUPIL[-1][1]
 
 
-def lid_at(t, close):
-    """How far the upper lid edge drops (px): squints, follows a downward look, closes on blinks."""
+def lid_at(t):
+    """How closed the upper lid is (0 open .. 1 shut): squints, follows a downward look, blinks."""
     x, y, q = glance_at(t)
-    drop = 38 * q + 0.6 * max(y, 0)
+    c = 0.9 * q + 0.004 * max(y, 0)
     for b in BLINKS:
         d = t - b
-        if 0 <= d < 0.08:
-            k = ease(d / 0.08)
-        elif 0.08 <= d < 0.12:
+        if 0 <= d < 0.07:
+            k = ease(d / 0.07)
+        elif 0.07 <= d < 0.12:
             k = 1.0
-        elif 0.12 <= d < 0.3:
-            k = 1 - ease((d - 0.12) / 0.18)
+        elif 0.12 <= d < 0.32:
+            k = 1 - ease((d - 0.12) / 0.2)
         else:
             continue
-        drop += (close - drop) * k
-    return drop
+        c += (1 - c) * k
+    return c
+
+
+def lid_frame(t, levels):
+    """Index of the pre-drawn lid closest to the current closure, or None while fully open."""
+    c = lid_at(t)
+    if c < levels[0] / 2:
+        return None
+    return min(range(len(levels)), key=lambda k: abs(levels[k] - c))
 
 
 def keyframes(name, fn):
@@ -112,7 +120,8 @@ def keyframes(name, fn):
 
 def eye_svg(c, eye, ax, ay, theme):
     """One animated eye: static picture, an iris that glances around behind the opening with a
-    breathing pupil and lagging catchlights, and an upper lid that stretches down to blink."""
+    breathing pupil and lagging catchlights, and an upper lid that blinks and squints by
+    flipping through pre-drawn lid positions."""
     cw, ch, base = eye["cell_w"], eye["cell_h"], eye["baseline"]
     pts = lambda poly: " ".join(f"{ax + x:.1f},{ay + y:.1f}" for x, y in poly)
 
@@ -121,24 +130,21 @@ def eye_svg(c, eye, ax, ay, theme):
                        f'textLength="{len(r) * cw:.2f}">{escape(r)}</text>' for i, r in enumerate(spr["rows"]) if r.strip())
 
     ix, iy = ax + eye["iris_center"][0], ay + eye["iris_center"][1]
-    y0 = ay + eye["crease_top"]                                   # the lid stretches down from here
-    span = eye["lash_mid"] + 5 - eye["crease_top"]
-    close = eye["low_mid"] - eye["lash_mid"] + 3
+    levels = [lid["c"] for lid in eye["lids"]]
 
-    def stretch(t):
-        s = 1 + lid_at(t, close) / span
-        return f"transform:translate(0px,{y0:.1f}px) scale(1,{s:.3f}) translate(0px,{-y0:.1f}px)"
-
-    css = (keyframes("gz", lambda t: "transform:translate({:.1f}px,{:.1f}px)".format(*gaze_at(t)))
-           + keyframes("gl", lambda t: "transform:translate({:.1f}px,{:.1f}px)".format(*(0.35 * v for v in gaze_at(t))))
-           + keyframes("pp", lambda t: f"transform:scale({pupil_at(t):.3f})")
-           + keyframes("st", stretch)
-           + keyframes("lv", lambda t: f"opacity:{1 if lid_at(t, close) > 0.4 else 0}")
-           + f".gz{{animation:gz {EYE_T}s linear infinite}}.gl{{animation:gl {EYE_T}s linear infinite}}"
-           f".pp{{transform-box:fill-box;transform-origin:center;animation:pp {EYE_T}s linear infinite}}"
-           f".st{{animation:st {EYE_T}s linear infinite}}.lv{{opacity:0;animation:lv {EYE_T}s steps(1) infinite}}"
-           f".iris{{fill:{c['value']}}}"
-           "@media (prefers-reduced-motion:reduce){.gz,.gl,.pp,.st,.lv{animation:none}}")
+    lids = [f"l{k}" for k in range(len(levels))]
+    css = "".join([
+        keyframes("gz", lambda t: "transform:translate({:.1f}px,{:.1f}px)".format(*gaze_at(t))),
+        keyframes("gl", lambda t: "transform:translate({:.1f}px,{:.1f}px)".format(*(0.35 * v for v in gaze_at(t)))),
+        keyframes("pp", lambda t: f"transform:scale({pupil_at(t):.3f})"),
+        *(keyframes(n, lambda t, k=k: f"opacity:{1 if lid_frame(t, levels) == k else 0}") for k, n in enumerate(lids)),
+        f".gz{{animation:gz {EYE_T}s linear infinite}}.gl{{animation:gl {EYE_T}s linear infinite}}",
+        f".pp{{transform-box:fill-box;transform-origin:center;animation:pp {EYE_T}s linear infinite}}",
+        *(f".{n}{{opacity:0;animation:{n} {EYE_T}s steps(1) infinite}}" for n in lids),
+        f".iris{{fill:{c['value']}}}",
+        "@media (prefers-reduced-motion:reduce){" + ",".join([".gz", ".gl", ".pp"] + [f".{n}" for n in lids])
+        + "{animation:none}}",
+    ])
     if theme == "light":     # solid ink pupil, catchlights cut out of it
         w, d = eye["glint_shape"]["window"], eye["glint_shape"]["dot"]
         pupil = text(eye["pupil"], "art")
@@ -146,16 +152,15 @@ def eye_svg(c, eye, ax, ay, theme):
                  f'<circle cx="{ix + d[0]:.1f}" cy="{iy + d[1]:.1f}" r="{d[2]}" fill="{c["bg"]}"/>')
     else:                    # dark pupil, catchlights drawn in ink
         pupil, glint = "", text(eye["glint"], "art")
-    defs = (f'<defs><clipPath id="eyeopen"><polygon points="{pts(eye["opening"])}"/></clipPath>'
-            f'<clipPath id="eyelid"><polygon points="{pts(eye["lid_clip"])}"/></clipPath></defs>')
+    defs = f'<defs><clipPath id="eyeopen"><polygon points="{pts(eye["opening"])}"/></clipPath></defs>'
     out = [defs, f'<g class="art" font-size="{eye["font_size"]}" font-weight="bold" xml:space="preserve">',
            text(dict(col=0, row=0, rows=eye["base"]), "art"),
            f'<g clip-path="url(#eyeopen)"><g class="gz">'
            f'<circle cx="{ix:.1f}" cy="{iy:.1f}" r="{eye["r_iris"] + 1:.1f}" fill="{c["bg"]}"/>' + text(eye["iris"], "iris") +
            f'<g class="pp"><circle cx="{ix:.1f}" cy="{iy:.1f}" r="{eye["r_pupil"]:.1f}" fill="{c["bg"]}"/>{pupil}</g></g>'
            f'<g class="gl">{glint}</g></g>',
-           f'<g class="lv" clip-path="url(#eyelid)"><g class="st"><polygon points="{pts(eye["band_poly"])}" fill="{c["bg"]}"/>'
-           + text(eye["band_text"], "art") + "</g></g>",
+           "".join(f'<g class="l{k}"><polygon points="{pts(lid["poly"])}" fill="{c["bg"]}"/>{text(lid["text"], "art")}</g>'
+                   for k, lid in enumerate(eye["lids"])),
            "</g>"]
     return css, "".join(out)
 
