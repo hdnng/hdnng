@@ -42,26 +42,28 @@ S = GW / CELL_W                   # raster px per art px
 GLYPHS = " .`',:;\"-_~^!|/\\()[]{}<>?=+*rcszvunxoaeLJTYVli17IkhbdpqXZOQ08&%#$BMW@"
 
 # geometry, in art px; u runs from -1 (inner corner, left) to 1 (outer corner, right)
-CX, CY, A = 222.0, 236.0, 170.0
-H_UP, H_LO = 64.0, 42.0
-IRIS = (CX + 6.0, CY - 8.0)
-R_IRIS, R_PUPIL = 57.0, 19.0
+# proportions follow the owner's own eye: long and narrow, a flat upper lid with a low fold,
+# a large iris tucked under both lids, short fine lashes
+CX, CY, A = 212.0, 240.0, 166.0
+H_UP, H_LO = 50.0, 30.0
+IRIS = (CX + 4.0, CY - 5.0)
+R_IRIS, R_PUPIL = 51.0, 16.0
 
 
 def corner(u):
-    return 4 - 6 * u                                   # inner corner sits a little lower
+    return 3 - 3 * u                                   # inner corner sits a little lower
 
 
 def lash_y(u):
-    return CY + corner(u) - H_UP * max(1 - u * u, 0) ** 0.62 * (1 - 0.16 * u)
+    return CY + corner(u) - H_UP * max(1 - u * u, 0) ** 0.42 * (1 - 0.05 * u)
 
 
 def low_y(u):
-    return CY + corner(u) + H_LO * max(1 - u * u, 0) ** 0.85 * (1 + 0.3 * u)
+    return CY + corner(u) + H_LO * max(1 - u * u, 0) ** 0.75 * (1 + 0.15 * u)
 
 
 def crease_y(u):
-    return lash_y(min(u, 1)) - 20 - 12 * max(1 - u * u, 0) ** 0.8 - 30 * max(u - 1, 0)
+    return lash_y(min(u, 1)) - 9 - 6 * max(1 - u * u, 0) ** 0.8 - 14 * max(u - 1, 0)
 
 
 def edge_y(u, c=0.0):
@@ -69,7 +71,7 @@ def edge_y(u, c=0.0):
     lower lid; past the outer corner the lash flick swings from up-and-out to down-and-out."""
     uu = min(u, 1)
     y = (1 - c) * lash_y(uu) + c * (low_y(uu) - 3)
-    return y - (1 - c) * 57.2 * max(u - 1, 0) + c * 14 * max(u - 1, 0)
+    return y - (1 - c) * 14 * max(u - 1, 0) + c * 8 * max(u - 1, 0)
 
 
 def X(u):
@@ -78,14 +80,14 @@ def X(u):
 
 def brow_t(x):
     """Position along the brow, 0 at the inner end .. 1 at the tip of the tail."""
-    return np.clip((x - 36) / 372, 0, 1)
+    return np.clip((x - 30) / 392, 0, 1)
 
 
 def brow_mid(x):
-    """Brow centre line: a gentle rise from the inner end, then the tail sweeps up to a point."""
+    """Brow centre line: nearly straight, climbing steadily towards the tail, which flicks up."""
     t = brow_t(x)
-    tail = np.clip((t - 0.5) / 0.5, 0, 1)
-    return 106 - 12 * t - 6 * np.sin(np.pi * t) - 40 * (tail * tail * (3 - 2 * tail)) ** 1.5
+    tail = np.clip((t - 0.6) / 0.4, 0, 1)
+    return 122 - 30 * t - 3 * np.sin(np.pi * t) - 14 * (tail * tail * (3 - 2 * tail)) ** 1.5
 
 
 def curve(f, a=-1.0, b=1.0, n=80):
@@ -101,7 +103,7 @@ LID_LEVELS = [0.12, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0]   # pre-drawn lid positions
 
 def lid_region(c):
     """Area a lid frame repaints: from above the lashes down to just under the lid edge."""
-    top = [(X(u), lash_y(min(u, 1)) - 40 - 57 * max(u - 1, 0)) for u in np.linspace(-1.05, 1.2, 60)]
+    top = [(X(u), lash_y(min(u, 1)) - 30 - 20 * max(u - 1, 0)) for u in np.linspace(-1.05, 1.2, 60)]
     bot = [(X(u), edge_y(u, c) + 6 + 10 * c * c) for u in np.linspace(1.2, -1.05, 60)]
     return top + bot
 
@@ -167,29 +169,30 @@ def paint_base(rng, c=0.0):
     grain = np.asarray(Image.fromarray(grain).resize((p.w, p.h), Image.BICUBIC))
     p.L += 0.012 * grain
     big = np.asarray(Image.fromarray(rng.normal(0, 1, (8, 8)).astype(np.float32)).resize((p.w, p.h), Image.BICUBIC))
-    p.L += 0.03 * big
+    p.L += 0.01 * big
     u = np.clip((x - CX) / A, -1.3, 1.3)
     brow_line = brow_mid(x)
     p.L += 0.10 * np.exp(-((y - (brow_line + 52)) / 22) ** 2)                    # brow bone catches light
-    p.L -= 0.16 * np.exp(-((y - (brow_line + 18)) / 10) ** 2) * smooth(1.08, 0.85, (x - 36) / 372)  # under the brow
+    p.L -= 0.16 * np.exp(-((y - (brow_line + 20)) / 10) ** 2) * smooth(1.08, 0.85, (x - 30) / 392)  # under the brow
     socket = ((x - CX) / (A * 1.12)) ** 2 + ((y - CY) / 112) ** 2
     p.L -= 0.12 * np.exp(-socket * 1.6)                                        # eye socket
-    p.L -= 0.10 * np.exp(-((y - (CY + 70 + 10 * u)) / 14) ** 2) * smooth(1.3, 0.9, np.abs(u))  # under-eye fold
+    p.L -= 0.08 * np.exp(-((y - (CY + 50 + 8 * u)) / 12) ** 2) * smooth(1.3, 0.9, np.abs(u))  # under-eye fold
 
-    # brow: thousands of fine hairs, dense and upright at the inner end, combed up along the tail,
-    # which thins to a sharp upswept point
+    # brow: a thick, fairly straight band of fine hairs; soft and upright at the inner end, combed
+    # flat along the body and up along the tail, which thins to a point
     def brow_draw(d):
         for _ in range(4200):
-            t = rng.beta(1.2, 1.5)
-            bx = 36 + 372 * t
+            t = rng.beta(1.3, 1.3)
+            bx = 30 + 392 * t
             mid = float(brow_mid(bx))
-            thick = 32 * (1 - t) ** 0.75 + 1.2
+            thick = (30 + 10 * min(t / 0.35, 1)) * (1 - t) ** 0.55 + 1.5
             by = mid + rng.normal(0, thick / 3.4)
-            sweep = min(max((t - 0.55) / 0.45, 0), 1)
-            ang = math.radians(-55 + 45 * t - 24 * sweep + rng.normal(0, 9 * (1 - 0.5 * t)))
-            ln = rng.uniform(7, 15) * (1 - 0.3 * t)
+            sweep = min(max((t - 0.6) / 0.4, 0), 1)
+            ang = math.radians(-75 + 63 * min(t / 0.25, 1) - 14 * sweep + rng.normal(0, 9 * (1 - 0.5 * t)))
+            ln = rng.uniform(8, 16) * (1 - 0.3 * t)
+            soft = min(1.0, 0.45 + 3 * t)                                    # the inner end is lighter
             d.line([(bx * S, by * S), ((bx + math.cos(ang) * ln) * S, (by + math.sin(ang) * ln) * S)],
-                   fill=int(rng.uniform(170, 255)), width=max(1, round(rng.uniform(0.6, 1.2) * S)))
+                   fill=int(rng.uniform(170, 255) * soft), width=max(1, round(rng.uniform(0.6, 1.2) * S)))
     hair = p.mask(brow_draw, 0.25)
     p.put(hair, 0.1, 0.95)
 
@@ -206,7 +209,7 @@ def paint_base(rng, c=0.0):
     # eye white: rounded shading, shadow cast by the lid, darker corners, a few faint veins
     op = p.poly(opening(c), 0.4)
     top = np.interp(x, *zip(*curve(lambda v: edge_y(v, c))))
-    ball = ((x - IRIS[0]) / (A * 1.05)) ** 2 + ((y - IRIS[1]) / 95) ** 2
+    ball = ((x - IRIS[0]) / (A * 1.05)) ** 2 + ((y - IRIS[1]) / 70) ** 2
     white = 0.93 - 0.18 * ball - 0.5 * np.exp(-np.clip(y - top, 0, None) / 11) - 0.25 * smooth(0.6, 1.0, np.abs(u))
     p.put(op, np.clip(white, 0, 1))
     for k in range(7):
@@ -229,33 +232,33 @@ def paint_base(rng, c=0.0):
         bx, by = X(u0), low_y(u0) + 3
         ang = math.radians(90 - 45 * (u0 + 0.6) / 1.6 + rng.normal(0, 6))
         ln = rng.uniform(4, 10) * (0.6 + 0.6 * (u0 + 0.6) / 1.6)
-        p.taper([(bx, by), (bx + math.cos(ang) * ln, by + math.sin(ang) * ln)], 1.0, 0.3, 0.2, 0.8)
+        p.taper([(bx, by), (bx + math.cos(ang) * ln * 0.6, by + math.sin(ang) * ln * 0.6)], 0.8, 0.3, 0.3, 0.5)
 
     # upper lash line: a heavy dark band, thickest in the middle, with a flick past the outer corner
     def band(d):
         us = np.linspace(-1, 1.1, 120)
         for k in range(len(us) - 1):
             ua, ub = us[k], us[k + 1]
-            w = (3 + 5 * max(1 - (ua - 0.25) ** 2, 0)) * S
+            w = (2.2 + 3.2 * max(1 - (ua - 0.25) ** 2, 0)) * S
             ya, yb = edge_y(ua, c), edge_y(ub, c)
             d.line([(X(ua) * S, ya * S), (X(ub) * S, yb * S)], fill=255, width=round(w))
     p.put(p.mask(band, 0.5), 0.04)
-    # upper lashes: clumped, curling up and out, longest towards the outer corner; as the lid
-    # closes they swing round to hang down and out
-    for u0 in np.sort(rng.uniform(-0.9, 1.1, 150)):
+    # upper lashes: short and fine, pointing forward and out, longest towards the outer corner;
+    # as the lid closes they swing round to hang down and out
+    for u0 in np.sort(rng.uniform(-0.85, 1.02, 150)):
         u1 = u0
         bx = X(u1)
         by = edge_y(u1, c) - 1
         t = min(max((u0 + 0.9) / 2.0, 0.0), 1.0)
-        ln = (7 + 22 * t ** 1.5) * rng.uniform(0.55, 1.15)
-        ang = math.radians((1 - c) * (-100 + 75 * t) + c * (80 - 40 * t) + rng.normal(0, 5))
+        ln = (4 + 9 * t ** 1.3) * rng.uniform(0.6, 1.1)
+        ang = math.radians((1 - c) * (-80 + 55 * t) + c * (80 - 40 * t) + rng.normal(0, 5))
         curl = 1 - 2 * c
         p2 = (bx + math.cos(ang) * ln + 6 * t, by + math.sin(ang) * ln + 4 * t * curl)
         p1 = (bx + math.cos(ang) * ln * 0.45, by + math.sin(ang) * ln * 0.6 - 3 * curl)
-        p.taper(bezier((bx, by), p1, p2), rng.uniform(1.0, 1.7), 0.3, 0.05, 0.95)
+        p.taper(bezier((bx, by), p1, p2), rng.uniform(0.7, 1.2), 0.25, 0.1, 0.85)
 
     # a beauty mark just below and outside the outer corner
-    mx, my, mr = X(1.0) + 10, CY + corner(1.0) + 31, 6.5
+    mx, my, mr = X(1.0) + 30, CY + corner(1.0) + 40, 5.8
     p.put(p.mask(lambda d: d.ellipse(((mx - mr) * S, (my - mr * 0.85) * S, (mx + mr) * S, (my + mr * 0.85) * S),
                                      fill=255), 0.4), 0.0)
     return p
@@ -282,8 +285,8 @@ def paint_iris(rng):
 
 def glint_shapes():
     """Catchlights relative to the iris centre: a slanted window and a small dot."""
-    window = [(-31, -36), (-15, -40), (-12, -27), (-28, -23)]
-    dot = (19, 15, 3.6)
+    window = [(-19, -16), (-9, -18), (-8, 2), (-18, 4)]     # a tall window reflection beside the pupil
+    dot = (13, 9, 2.8)
     return window, dot
 
 
@@ -355,7 +358,7 @@ def main():
                                d.ellipse(((IRIS[0] + gx - gr) * S, (IRIS[1] + gy - gr) * S,
                                           (IRIS[0] + gx + gr) * S, (IRIS[1] + gy + gr) * S), fill=255)), 0.4)
     # fade the picture out towards the edges of the art column
-    fx, fy = (base.x - ART_W / 2) / (ART_W / 2 + 6), (base.y - ART_H / 2) / (ART_H / 2 + 4)
+    fx, fy = (base.x - ART_W / 2) / (ART_W / 2 + 30), (base.y - ART_H / 2) / (ART_H / 2 + 4)
     fade = np.clip((1 - (np.abs(fx) ** 3.4 + np.abs(fy) ** 3.4)) / 0.38, 0, 1) ** 0.9
 
     out = dict(cols=COLS, rows=ROWS, cell_w=CELL_W, cell_h=CELL_H, font_size=round(CELL_W / 0.6, 3),
