@@ -76,6 +76,18 @@ def X(u):
     return CX + u * A
 
 
+def brow_t(x):
+    """Position along the brow, 0 at the inner end .. 1 at the tip of the tail."""
+    return np.clip((x - 36) / 372, 0, 1)
+
+
+def brow_mid(x):
+    """Brow centre line: a gentle rise from the inner end, then the tail sweeps up to a point."""
+    t = brow_t(x)
+    tail = np.clip((t - 0.5) / 0.5, 0, 1)
+    return 106 - 12 * t - 6 * np.sin(np.pi * t) - 40 * (tail * tail * (3 - 2 * tail)) ** 1.5
+
+
 def curve(f, a=-1.0, b=1.0, n=80):
     return [(X(u), f(u)) for u in np.linspace(a, b, n)]
 
@@ -157,22 +169,24 @@ def paint_base(rng, c=0.0):
     big = np.asarray(Image.fromarray(rng.normal(0, 1, (8, 8)).astype(np.float32)).resize((p.w, p.h), Image.BICUBIC))
     p.L += 0.03 * big
     u = np.clip((x - CX) / A, -1.3, 1.3)
-    brow_line = 92 - 30 * np.sin(np.clip((x - 30) / 410, 0, 1) * math.pi) ** 1.1 + 0.05 * (x - 30)
+    brow_line = brow_mid(x)
     p.L += 0.10 * np.exp(-((y - (brow_line + 52)) / 22) ** 2)                    # brow bone catches light
-    p.L -= 0.16 * np.exp(-((y - (brow_line + 18)) / 10) ** 2)                    # shadow under the brow
+    p.L -= 0.16 * np.exp(-((y - (brow_line + 18)) / 10) ** 2) * smooth(1.08, 0.85, (x - 36) / 372)  # under the brow
     socket = ((x - CX) / (A * 1.12)) ** 2 + ((y - CY) / 112) ** 2
     p.L -= 0.12 * np.exp(-socket * 1.6)                                        # eye socket
     p.L -= 0.10 * np.exp(-((y - (CY + 70 + 10 * u)) / 14) ** 2) * smooth(1.3, 0.9, np.abs(u))  # under-eye fold
 
-    # brow: thousands of fine hairs, dense and upright at the inner end, flat and thin at the tail
+    # brow: thousands of fine hairs, dense and upright at the inner end, combed up along the tail,
+    # which thins to a sharp upswept point
     def brow_draw(d):
         for _ in range(4200):
             t = rng.beta(1.2, 1.5)
-            bx = 30 + 405 * t
-            mid = 96 - 26 * math.sin(t * math.pi) ** 1.1 + 0.06 * (bx - 30)
-            thick = 34 * (1 - 0.78 * t)
+            bx = 36 + 372 * t
+            mid = float(brow_mid(bx))
+            thick = 32 * (1 - t) ** 0.75 + 1.2
             by = mid + rng.normal(0, thick / 3.4)
-            ang = math.radians(-55 + 45 * t + rng.normal(0, 9))
+            sweep = min(max((t - 0.55) / 0.45, 0), 1)
+            ang = math.radians(-55 + 45 * t - 24 * sweep + rng.normal(0, 9 * (1 - 0.5 * t)))
             ln = rng.uniform(7, 15) * (1 - 0.3 * t)
             d.line([(bx * S, by * S), ((bx + math.cos(ang) * ln) * S, (by + math.sin(ang) * ln) * S)],
                    fill=int(rng.uniform(170, 255)), width=max(1, round(rng.uniform(0.6, 1.2) * S)))
@@ -342,7 +356,7 @@ def main():
                                           (IRIS[0] + gx + gr) * S, (IRIS[1] + gy + gr) * S), fill=255)), 0.4)
     # fade the picture out towards the edges of the art column
     fx, fy = (base.x - ART_W / 2) / (ART_W / 2 + 6), (base.y - ART_H / 2) / (ART_H / 2 + 4)
-    fade = np.clip((1 - (np.abs(fx) ** 2.6 + np.abs(fy) ** 2.6)) / 0.45, 0, 1) ** 0.9
+    fade = np.clip((1 - (np.abs(fx) ** 3.4 + np.abs(fy) ** 3.4)) / 0.38, 0, 1) ** 0.9
 
     out = dict(cols=COLS, rows=ROWS, cell_w=CELL_W, cell_h=CELL_H, font_size=round(CELL_W / 0.6, 3),
                baseline=base_frac, iris_center=list(IRIS), r_iris=R_IRIS, r_pupil=R_PUPIL,
