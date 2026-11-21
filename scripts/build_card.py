@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Render dark_mode.svg / light_mode.svg from config.json, the ASCII eye and cache/stats.json."""
+import base64
 import json
 import math
 from datetime import date
@@ -121,47 +122,52 @@ def keyframes(name, fn):
 def eye_svg(c, eye, ax, ay, theme):
     """One animated eye: static picture, an iris that glances around behind the opening with a
     breathing pupil and lagging catchlights, and an upper lid that blinks and squints by
-    flipping through pre-drawn lid positions."""
-    cw, ch, base = eye["cell_w"], eye["cell_h"], eye["baseline"]
+    flipping through pre-drawn lid positions.
+
+    Every ASCII layer is a PNG pre-rendered by scripts/raster_eye.py and embedded here: as SVG
+    text the eye would be some fifteen thousand characters repainted on every frame, which made
+    the page stutter on phones. The animation only moves and swaps these pictures."""
+    cw, ch = eye["cell_w"], eye["cell_h"]
     pts = lambda poly: " ".join(f"{ax + x:.1f},{ay + y:.1f}" for x, y in poly)
 
-    def text(spr, cls):
-        return "".join(f'<text class="{cls}" x="{ax + spr["col"] * cw:.2f}" y="{ay + (spr["row"] + i) * ch + ch * base:.2f}" '
-                       f'textLength="{len(r) * cw:.2f}">{escape(r)}</text>' for i, r in enumerate(spr["rows"]) if r.strip())
+    def image(name, spr):
+        png = base64.b64encode((ROOT / "assets" / "eye" / f"{name}_{theme}.png").read_bytes()).decode()
+        w, h = max(len(r) for r in spr["rows"]) * cw, len(spr["rows"]) * ch
+        return (f'<image x="{ax + spr["col"] * cw:.2f}" y="{ay + spr["row"] * ch:.2f}" width="{w:.2f}" '
+                f'height="{h:.2f}" xlink:href="data:image/png;base64,{png}"/>')
 
     ix, iy = ax + eye["iris_center"][0], ay + eye["iris_center"][1]
     levels = [lid["c"] for lid in eye["lids"]]
-
     lids = [f"l{k}" for k in range(len(levels))]
     css = "".join([
         keyframes("gz", lambda t: "transform:translate({:.1f}px,{:.1f}px)".format(*gaze_at(t))),
         keyframes("gl", lambda t: "transform:translate({:.1f}px,{:.1f}px)".format(*(0.35 * v for v in gaze_at(t)))),
         keyframes("pp", lambda t: f"transform:scale({pupil_at(t):.3f})"),
-        *(keyframes(n, lambda t, k=k: f"opacity:{1 if lid_frame(t, levels) == k else 0}") for k, n in enumerate(lids)),
+        # lid frames are switched with visibility, not opacity: hidden elements are skipped when
+        # painting, while transparent ones still cost a repaint on every frame
+        *(keyframes(n, lambda t, k=k: f"visibility:{'visible' if lid_frame(t, levels) == k else 'hidden'}")
+          for k, n in enumerate(lids)),
         f".gz{{animation:gz {EYE_T}s linear infinite}}.gl{{animation:gl {EYE_T}s linear infinite}}",
         f".pp{{transform-box:fill-box;transform-origin:center;animation:pp {EYE_T}s linear infinite}}",
-        *(f".{n}{{opacity:0;animation:{n} {EYE_T}s steps(1) infinite}}" for n in lids),
-        f".iris{{fill:{c['value']}}}",
+        *(f".{n}{{visibility:hidden;animation:{n} {EYE_T}s steps(1) infinite}}" for n in lids),
         "@media (prefers-reduced-motion:reduce){" + ",".join([".gz", ".gl", ".pp"] + [f".{n}" for n in lids])
         + "{animation:none}}",
     ])
     if theme == "light":     # solid ink pupil, catchlights cut out of it
         w, d = eye["glint_shape"]["window"], eye["glint_shape"]["dot"]
-        pupil = text(eye["pupil"], "art")
+        pupil = image("pupil", eye["pupil"])
         glint = (f'<polygon points="{" ".join(f"{ix + x:.1f},{iy + y:.1f}" for x, y in w)}" fill="{c["bg"]}"/>'
                  f'<circle cx="{ix + d[0]:.1f}" cy="{iy + d[1]:.1f}" r="{d[2]}" fill="{c["bg"]}"/>')
     else:                    # dark pupil, catchlights drawn in ink
-        pupil, glint = "", text(eye["glint"], "art")
-    defs = f'<defs><clipPath id="eyeopen"><polygon points="{pts(eye["opening"])}"/></clipPath></defs>'
-    out = [defs, f'<g class="art" font-size="{eye["font_size"]}" font-weight="bold" xml:space="preserve">',
-           text(dict(col=0, row=0, rows=eye["base"]), "art"),
+        pupil, glint = "", image("glint", eye["glint"])
+    out = [f'<defs><clipPath id="eyeopen"><polygon points="{pts(eye["opening"])}"/></clipPath></defs>',
+           image("base", dict(col=0, row=0, rows=eye["base"])),
            f'<g clip-path="url(#eyeopen)"><g class="gz">'
-           f'<circle cx="{ix:.1f}" cy="{iy:.1f}" r="{eye["r_iris"] + 1:.1f}" fill="{c["bg"]}"/>' + text(eye["iris"], "iris") +
+           f'<circle cx="{ix:.1f}" cy="{iy:.1f}" r="{eye["r_iris"] + 1:.1f}" fill="{c["bg"]}"/>' + image("iris", eye["iris"]) +
            f'<g class="pp"><circle cx="{ix:.1f}" cy="{iy:.1f}" r="{eye["r_pupil"]:.1f}" fill="{c["bg"]}"/>{pupil}</g></g>'
            f'<g class="gl">{glint}</g></g>',
-           "".join(f'<g class="l{k}"><polygon points="{pts(lid["poly"])}" fill="{c["bg"]}"/>{text(lid["text"], "art")}</g>'
-                   for k, lid in enumerate(eye["lids"])),
-           "</g>"]
+           "".join(f'<g class="l{k}"><polygon points="{pts(lid["poly"])}" fill="{c["bg"]}"/>{image(f"lid{k}", lid["text"])}</g>'
+                   for k, lid in enumerate(eye["lids"]))]
     return css, "".join(out)
 
 
@@ -231,7 +237,7 @@ def render(theme, cfg, stats):
     H = round(BAR + PAD + body_h + PAD)
     info_x = PAD + art_w + PAD
     eye_css, eye_markup = eye_svg(c, eye, PAD, BAR + PAD + (body_h - art_h) / 2, theme)
-    o = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
+    o = [f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
          f'font-family="Consolas, \'Cascadia Mono\', \'DejaVu Sans Mono\', Menlo, monospace" role="img" '
          f'aria-label="{cfg["username"]} profile card">',
          "<style>"

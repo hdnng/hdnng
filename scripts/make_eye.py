@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Paint one detailed eye (in the style of the profile avatar) and convert it to ASCII layers.
 
-Writes assets/eye.json, which build_card.py animates. The eye is painted as a
+Writes assets/eye.json and, through raster_eye.py, the PNG layers build_card.py animates. The eye is painted as a
 full-tone greyscale picture: skin, brow hairs, lid crease, a heavy lash line,
 wet lower rim, shaded eye white, a fibrous iris with a dark limbal ring, pupil
 and window-shaped catchlights. It is converted twice, once per theme, so it
@@ -379,6 +379,9 @@ def main():
     preview = b
     (ROOT / "assets" / "eye.json").write_text(json.dumps(out, separators=(",", ":")) + "\n")
     print("\n".join(r.rstrip() for r in preview))
+    # the card embeds the layers as pictures, so render them now
+    import raster_eye
+    raster_eye.main()
 
 
 if __name__ == "__main__":
