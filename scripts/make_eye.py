@@ -216,6 +216,11 @@ def paint_base(rng):
         p2 = (bx + math.cos(ang) * ln + 6 * t, by + math.sin(ang) * ln + 4 * t)
         p1 = (bx + math.cos(ang) * ln * 0.45, by + math.sin(ang) * ln * 0.6 - 3)
         p.taper(bezier((bx, by), p1, p2), rng.uniform(1.0, 1.7), 0.3, 0.05, 0.95)
+
+    # a beauty mark just below and outside the outer corner
+    mx, my, mr = X(1.0) + 2, CY + corner(1.0) + 22, 6.5
+    p.put(p.mask(lambda d: d.ellipse(((mx - mr) * S, (my - mr * 0.85) * S, (mx + mr) * S, (my + mr * 0.85) * S),
+                                     fill=255), 0.4), 0.0)
     return p
 
 
