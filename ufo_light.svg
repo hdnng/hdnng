@@ -380,6 +380,7 @@
 <rect x="926.0" y="286" width="12" height="12" rx="2"/>
 <rect x="926.0" y="302" width="12" height="12" rx="2"/>
 <rect x="926.0" y="318" width="12" height="12" rx="2"/>
+<rect x="926.0" y="334" width="12" height="12" rx="2"/>
 </g>
 
 
@@ -479,5 +480,5 @@
 <path id="sp0" d="M662.0 111.0L663.3 114.7L667.0 116.0L663.3 117.3L662.0 121.0L660.7 117.3L657.0 116.0L660.7 114.7z" fill="#f5c518"/>
 <path id="sp1" d="M704.0 99.0L705.3 102.7L709.0 104.0L705.3 105.3L704.0 109.0L702.7 105.3L699.0 104.0L702.7 102.7z" fill="#f5c518"/>
 <path id="sp2" d="M700.0 125.0L701.3 128.7L705.0 130.0L701.3 131.3L700.0 135.0L698.7 131.3L695.0 130.0L698.7 128.7z" fill="#f5c518"/>
-<text x="94.0" y="386" font-size="15"><tspan class="d">&gt; </tspan><tspan class="v">1,970 contributions</tspan><tspan class="t"> abducted from the last year </tspan><tspan class="cur">█</tspan></text>
+<text x="94.0" y="386" font-size="15"><tspan class="d">&gt; </tspan><tspan class="v">1,973 contributions</tspan><tspan class="t"> abducted from the last year </tspan><tspan class="cur">█</tspan></text>
 </svg>
